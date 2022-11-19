@@ -259,7 +259,7 @@ func vendorAll(
 
 		logger.Trace().Str("path", path).Msg("found Terraform file")
 
-		modules, err := tf.ParseModules(path)
+		modules, err := tf.ParseModuleBlocks(path)
 		if err != nil {
 			errs.Append(err)
 			return nil

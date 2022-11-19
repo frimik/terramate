@@ -15,6 +15,7 @@
 package stack
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -26,6 +27,7 @@ import (
 	"github.com/mineiros-io/terramate/errors"
 	"github.com/mineiros-io/terramate/hcl"
 	"github.com/mineiros-io/terramate/project"
+	"github.com/mineiros-io/terramate/tf"
 	"github.com/rs/zerolog/log"
 )
 
@@ -69,6 +71,9 @@ type (
 
 		// changed tells if this is a changed stack.
 		changed bool
+
+		// modules contains the modules referenced by the stack
+		modules []tf.Module
 	}
 
 	// Metadata has all metadata loaded per stack
@@ -89,6 +94,8 @@ type (
 		Desc() string
 		// RelPathToRoot is the relative path from the stack to root.
 		RelPathToRoot() string
+		// Modules holds the local modules referenced by the stack
+		Modules() []tf.Module
 	}
 
 	// List of stacks.
@@ -179,6 +186,15 @@ func (s S) WantedBy() []string { return s.wantedBy }
 // Watch returns the list of watched files.
 func (s *S) Watch() []project.Path { return s.watch }
 
+func (s *S) RelWatch() []string {
+	relwatch := []string{}
+	for _, file := range s.Watch() {
+		rel, _ := filepath.Rel(s.Path().String(), file.String())
+		relwatch = append(relwatch, rel)
+	}
+	return relwatch
+}
+
 // IsChanged tells if the stack is marked as changed.
 func (s *S) IsChanged() bool { return s.changed }
 
@@ -202,6 +218,40 @@ func (s *S) RelPathToRoot() string { return s.relPathToRoot }
 
 // HostPath returns the file system absolute path of stack.
 func (s *S) HostPath() string { return s.hostpath }
+
+// Modules returns the modules referenced in the stack
+func (s *S) Modules() []tf.Module { return s.modules }
+
+// AddModules adds modules to the stack list of modules
+func (s *S) AddModules(m []tf.Module) { s.modules = append(s.modules, m...) }
+
+func (s *S) MarshalJSON() ([]byte, error) {
+	m := make(map[string]interface{})
+	m["id"], _ = s.ID()
+	m["name"] = s.Name()
+	m["desc"] = s.Desc()
+	m["path"] = s.Path().String()
+	m["pathbase"] = s.PathBase()
+	m["relpath"] = s.RelPath()
+	m["relpathtoroot"] = s.RelPathToRoot()
+	m["hostpath"] = s.HostPath()
+
+	if len(s.Modules()) > 0 {
+		m["modules"] = s.Modules()
+	}
+
+	if len(s.Watch()) > 0 {
+		m["watch"] = s.Watch()
+
+		relwatches := []string{}
+		for _, file := range s.Watch() {
+			relwatches = append(relwatches, filepath.Join(s.Path().String(), s.RelPathToRoot(), file.String()))
+		}
+		m["relwatch"] = s.RelWatch()
+	}
+
+	return json.Marshal(m)
+}
 
 func validateWatchPaths(rootdir string, stackpath string, paths []string) (project.Paths, error) {
 	var projectPaths project.Paths

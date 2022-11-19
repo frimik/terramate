@@ -29,7 +29,7 @@ import (
 
 type (
 	want struct {
-		modules []tf.Module
+		modules []tf.ModuleBlock
 		errs    []error
 	}
 
@@ -76,7 +76,7 @@ func TestHCLParserModules(t *testing.T) {
 				body:     `module "test" {source = ""}`,
 			},
 			want: want{
-				modules: []tf.Module{
+				modules: []tf.ModuleBlock{
 					{
 						Source: "",
 					},
@@ -90,7 +90,7 @@ func TestHCLParserModules(t *testing.T) {
 				body:     `module "test" {source = "test"}`,
 			},
 			want: want{
-				modules: []tf.Module{
+				modules: []tf.ModuleBlock{
 					{
 						Source: "test",
 					},
@@ -110,7 +110,7 @@ func TestHCLParserModules(t *testing.T) {
 			`,
 			},
 			want: want{
-				modules: []tf.Module{
+				modules: []tf.ModuleBlock{
 					{
 						Source: "test",
 					},
@@ -133,7 +133,7 @@ module "bleh" {
 `,
 			},
 			want: want{
-				modules: []tf.Module{
+				modules: []tf.ModuleBlock{
 					{
 						Source: "test",
 					},
@@ -241,7 +241,7 @@ module "test" {
 			tfpath := test.WriteFile(t, configdir, tc.input.filename, tc.input.body)
 			fixupFiledirOnErrorsFileRanges(configdir, tc.want.errs)
 
-			modules, err := tf.ParseModules(tfpath)
+			modules, err := tf.ParseModuleBlocks(tfpath)
 			errtest.AssertErrorList(t, err, tc.want.errs)
 			assert.EqualInts(t,
 				len(tc.want.modules),

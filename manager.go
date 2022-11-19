@@ -263,7 +263,7 @@ rangeStacks:
 				Str("configFile", tfpath).
 				Msg("Parse modules.")
 
-			modules, err := tf.ParseModules(tfpath)
+			modules, err := tf.ParseModuleBlocks(tfpath)
 			if err != nil {
 				return errors.E(errListChanged, "parsing modules", err)
 			}
@@ -447,7 +447,7 @@ func (m *Manager) filesApply(dir string, apply func(file fs.DirEntry) error) err
 // called recursively. The visited keep track of the modules already parsed to
 // avoid infinite loops.
 func (m *Manager) moduleChanged(
-	mod tf.Module, basedir string, visited map[string]bool,
+	mod tf.ModuleBlock, basedir string, visited map[string]bool,
 ) (changed bool, why string, err error) {
 	logger := log.With().
 		Str("action", "moduleChanged()").
@@ -512,7 +512,7 @@ func (m *Manager) moduleChanged(
 		logger.Trace().
 			Str("path", modPath).
 			Msg("Parse modules.")
-		modules, err := tf.ParseModules(filepath.Join(modPath, file.Name()))
+		modules, err := tf.ParseModuleBlocks(filepath.Join(modPath, file.Name()))
 		if err != nil {
 			return errors.E(err, "parsing module %q", mod.Source)
 		}
@@ -548,6 +548,83 @@ func (m *Manager) moduleChanged(
 	}
 
 	return changed, fmt.Sprintf("module %q changed because %s", mod.Source, why), nil
+}
+
+// RecurseModules recursively collects all included modules
+// All .tf files of the module are parsed and this function is
+// called recursively. The visited keep track of the modules already parsed to
+// avoid infinite loops.
+func (m *Manager) RecurseModules(
+	incomingMod tf.Module, stackHostPath string, visited map[string]bool,
+) (modules []tf.Module, err error) {
+	logger := log.With().
+		Str("action", "RecurseModules()").
+		Logger()
+
+	if _, ok := visited[incomingMod.HostPath]; !ok {
+
+		logger.Trace().
+			Str("path", incomingMod.HostPath).
+			Msg("Get module path info.")
+		st, err := os.Stat(incomingMod.HostPath)
+
+		if err != nil || !st.IsDir() {
+			return []tf.Module{}, errors.E("\"source\" path %q is not a directory", incomingMod.HostPath)
+		}
+
+		logger.Debug().
+			Str("path", incomingMod.HostPath).
+			Msg("Apply function to files in path.")
+		err = m.filesApply(incomingMod.HostPath, func(file fs.DirEntry) error {
+			if path.Ext(file.Name()) != ".tf" {
+				return nil
+			}
+
+			logger.Trace().
+				Str("path", incomingMod.HostPath).
+				Msg("Parse module blocks.")
+			modBlocks, err := tf.ParseModuleBlocks(filepath.Join(incomingMod.HostPath, file.Name()))
+			if err != nil {
+				return errors.E(err, "parsing module block %q", filepath.Join(incomingMod.HostPath, file.Name()))
+			}
+
+			for _, modBlock := range modBlocks {
+				if modBlock.IsLocal() {
+
+					fsPath := filepath.Join(incomingMod.HostPath, modBlock.Source)
+					stackRelPath, err := filepath.Rel(stackHostPath, fsPath)
+					relPath, err := filepath.Rel(incomingMod.HostPath, fsPath)
+					if err != nil {
+						return nil
+					}
+
+					module := tf.Module{
+						HostPath:     fsPath,
+						StackRelPath: stackRelPath,
+						RelPath:      relPath,
+					}
+
+					if _, ok := visited[module.HostPath]; !ok {
+
+						newModules, err := m.RecurseModules(module, stackHostPath, visited)
+						module.Modules = append(module.Modules, newModules...)
+						modules = append(modules, module)
+
+						modules = append(modules, newModules...)
+						if err != nil {
+							return nil
+						}
+						visited[module.HostPath] = true
+					}
+				}
+			}
+
+			return nil
+		})
+
+	}
+
+	return modules, nil
 }
 
 // listChangedFiles lists all changed files in the dir directory.

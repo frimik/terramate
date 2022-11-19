@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	gojson "encoding/json"
+
 	"github.com/google/uuid"
 	hhcl "github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclwrite"
@@ -150,6 +152,9 @@ type cliSpec struct {
 		RunOrder struct {
 			Basedir string `arg:"" optional:"true" help:"Base directory to search stacks"`
 		} `cmd:"" help:"Show the topological ordering of the stacks"`
+
+		Modules struct {
+		} `cmd:"" help:"List modules for all stacks"`
 
 		RunEnv struct {
 		} `cmd:"" help:"List run environment variables for all stacks"`
@@ -412,6 +417,9 @@ func (c *cli) run() {
 	case "experimental run-env":
 		c.setupGit()
 		c.printRunEnv()
+	case "experimental modules":
+		c.setupGit()
+		c.stacksModulesJson()
 	case "experimental eval":
 		log.Fatal().Msg("no expression specified")
 	case "experimental eval <expr>":
@@ -877,6 +885,50 @@ func (c *cli) newProjectMetadata(report *terramate.StacksReport) prj.Metadata {
 		stacks[i] = stackEntry.Stack
 	}
 	return stack.NewProjectMetadata(c.root(), stacks)
+}
+
+func (c *cli) stacksModulesJson() {
+	logger := log.With().
+		Str("action", "stacksModulesJson()").
+		Logger()
+
+	logger.Trace().
+		Msg("Create new terramate manager.")
+
+	mgr := terramate.NewManager(c.cfg(), c.prj.baseRef)
+	report, err := c.listStacks(mgr, c.parsedArgs.Changed)
+	if err != nil {
+		fatal(err, "listing stacks")
+	}
+
+	stacks := stack.List{}
+
+	for _, stackEntry := range c.filterStacksByWorkingDir(report.Stacks) {
+
+		theStack := stackEntry.Stack
+
+		// rootModule essentially means the stack itself
+		rootModule := tf.Module{
+			HostPath: theStack.HostPath(),
+		}
+
+		logger.Debug().
+			Stringer("stack", theStack).
+			Msg("Apply function to stack.")
+
+		modules, err := mgr.RecurseModules(rootModule, theStack.HostPath(), make(map[string]bool))
+		if err != nil {
+			fatal(err, "recursively listing modules")
+		}
+		theStack.AddModules(modules)
+
+		stacks = append(stacks, theStack)
+		rootModule.Modules = append(rootModule.Modules, modules...)
+
+	}
+
+	allStacksJson, _ := gojson.MarshalIndent(stacks, "", "  ")
+	c.output.Msg(out.V, stdfmt.Sprint(string(allStacksJson)))
 }
 
 func (c *cli) printRunEnv() {
